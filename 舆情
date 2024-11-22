@@ -1,0 +1,131 @@
+import json
+import pandas as pd
+import requests
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+
+# 获取个股新闻
+def stock_news_em(symbol: str = "300059", pages: int = 1) -> pd.DataFrame:
+    url = "http://search-api-web.eastmoney.com/search/jsonp"
+    all_data = []
+    for page in range(1, pages + 1):
+        params = {
+            "cb": "jQuery3510875346244069884_1668256937995",
+            "param": '{"uid":"",'
+            + f'"keyword":"{symbol}"'
+            + ',"type":["cmsArticleWebOld"],"client":"web","clientType":"web","clientVersion":"curr",'
+            f'"param":{{"cmsArticleWebOld":{{"searchScope":"default","sort":"default","pageIndex":{page},'
+            '"pageSize":100,"preTag":"<em>","postTag":"</em>"}}}}}',
+            "_": "1668256937996",
+        }
+        r = requests.get(url, params=params)
+        data_text = r.text
+        data_json = json.loads(
+            data_text.strip("jQuery3510875346244069884_1668256937995(")[:-1]
+        )
+        all_data.extend(data_json["result"]["cmsArticleWebOld"])
+    
+    temp_df = pd.DataFrame(all_data)
+    temp_df.rename(
+        columns={
+            "date": "发布时间",
+            "mediaName": "文章来源",
+            "code": "-",
+            "title": "新闻标题",
+            "content": "新闻内容",
+            "url": "新闻链接",
+            "image": "-",
+        },
+        inplace=True,
+    )
+    temp_df["关键词"] = symbol
+    temp_df = temp_df[
+        [
+            "关键词",
+            "新闻标题",
+            "新闻内容",
+            "发布时间",
+            "文章来源",
+            "新闻链接",
+        ]
+    ]
+    temp_df["新闻标题"] = (
+        temp_df["新闻标题"]
+        .str.replace(r"\(<em>", "", regex=True)
+        .str.replace(r"</em>\)", "", regex=True)
+    )
+    temp_df["新闻标题"] = (
+        temp_df["新闻标题"]
+        .str.replace(r"<em>", "", regex=True)
+        .str.replace(r"</em>", "", regex=True)
+    )
+    temp_df["新闻内容"] = (
+        temp_df["新闻内容"]
+        .str.replace(r"\(<em>", "", regex=True)
+        .str.replace(r"</em>\)", "", regex=True)
+    )
+    temp_df["新闻内容"] = (
+        temp_df["新闻内容"]
+        .str.replace(r"<em>", "", regex=True)
+        .str.replace(r"</em>", "", regex=True)
+    )
+    temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\u3000", "", regex=True)
+    temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\r\n", " ", regex=True)
+    return temp_df
+
+# 邮件发送函数
+def send_email(subject: str, body: str, attachment_path: str, to_email: str):
+    # 邮件配置
+    sender_email = "hola_marcus@icloud.com"  # 替换为你的 iCloud 邮箱地址
+    sender_password = "ilfz-jypd-razy-mgzc"  # 替换为你的 iCloud 应用专用密码
+    smtp_server = "smtp.mail.me.com"  # iCloud SMTP 服务器地址
+    smtp_port = 587  # 使用 TLS
+
+    # 创建邮件
+    msg = MIMEMultipart()
+    msg["From"] = sender_email
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    # 添加邮件正文
+    msg.attach(MIMEText(body, "plain"))
+
+    # 添加附件
+    if attachment_path and os.path.exists(attachment_path):
+        with open(attachment_path, "rb") as attachment:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f"attachment; filename={os.path.basename(attachment_path)}",
+            )
+            msg.attach(part)
+
+    # 发送邮件
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.starttls()  # 启用 TLS 加密
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, to_email, msg.as_string())
+        print(f"邮件已发送至 {to_email}")
+
+
+# 主程序
+if __name__ == "__main__":
+    stock_news_em_df = stock_news_em(symbol="300059", pages=1)
+    
+    # 保存结果到 Excel 文件
+    output_path = "stock_news.xlsx"
+    stock_news_em_df.to_excel(output_path, index=False)
+    
+    # 邮件内容
+    email_subject = "个股新闻数据"
+    email_body = "请查收附件中的个股新闻数据。"
+    recipient_email = "hola_marcus@icloud.com"  # 替换为收件人邮箱
+
+    # 发送邮件
+    send_email(email_subject, email_body, output_path, recipient_email)
